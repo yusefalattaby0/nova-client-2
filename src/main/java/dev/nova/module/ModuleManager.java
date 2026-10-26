@@ -38,6 +38,7 @@ public final class ModuleManager {
         register(new RespawnAnchorFinder());
         register(new AutoTotem());
         register(new FastCrystal());
+        register(new AutoSafeAnchor());
         register(new Freecam());
         register(new Trails());
         register(new AutoRtp());
