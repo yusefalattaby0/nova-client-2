@@ -3,6 +3,7 @@ package dev.nova.module;
 import dev.nova.module.client.*;
 import dev.nova.module.combat.*;
 import dev.nova.module.render.*;
+import dev.nova.module.utility.*;
 import dev.nova.util.Config;
 import net.minecraft.client.Minecraft;
 
