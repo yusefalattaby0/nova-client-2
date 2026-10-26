@@ -1,22 +1,8 @@
 package dev.nova.module;
 
-import dev.nova.module.client.GuiSettings;
-import dev.nova.module.combat.AutoTotem;
-import dev.nova.module.combat.FastCrystal;
-import dev.nova.module.render.AncientDebrisFinder;
-import dev.nova.module.render.BaseFinder;
-import dev.nova.module.render.EntityEsp;
-import dev.nova.module.render.EspModule;
-import dev.nova.module.render.Freecam;
-import dev.nova.module.render.OreFinder;
-import dev.nova.module.render.RespawnAnchorFinder;
-import dev.nova.module.render.SpawnerFinder;
-import dev.nova.module.render.StorageFinder;
-import dev.nova.module.render.Trails;
-import dev.nova.module.utility.AutoRtp;
-import dev.nova.module.utility.DonutWheel;
-import dev.nova.module.utility.InfoHud;
-import dev.nova.module.utility.RegionMap;
+import dev.nova.module.client.*;
+import dev.nova.module.combat.*;
+import dev.nova.module.render.*;
 import dev.nova.util.Config;
 import net.minecraft.client.Minecraft;
 
@@ -44,11 +30,7 @@ public final class ModuleManager {
         register(new AutoRtp());
         register(new DonutWheel());
         register(new RegionMap());
-        register(new InfoHud());
         register(new GuiSettings());
-        // On by default: their keys only work while the module is on. A saved config can still turn them off.
-        get(DonutWheel.class).setEnabled(true);
-        get(RegionMap.class).setEnabled(true);
         Config.load();
     }
 
