@@ -46,6 +46,7 @@ public class BaseFinder extends BlockEspModule {
     private final Setting.Num joinChunks = new Setting.Num("Join Distance", 3, 1, 8, 1, " chunks");
     private final Setting.Num surfaceY = new Setting.Num("Surface Level (Y)", 55, 30, 120, 1, "");
     private final Setting.Num surfacePenalty = new Setting.Num("Surface Penalty", 60, 0, 100, 5, "%");
+    private final Setting.Enm<MarkerStyle> markerStyle = new Setting.Enm<>("Site Box", MarkerStyle.VOLUME);
 
     // per-chunk rating levels
     private static final int R_LOW = 20, R_MID = 21, R_HIGH = 22, R_MAX = 23;
@@ -57,7 +58,7 @@ public class BaseFinder extends BlockEspModule {
     }
 
     /** One detected site. */
-    public record Site(Type type, boolean raided, int conf, int score, Vec3 center, int minY, int maxY,
+    public record Site(Type type, boolean raided, int conf, int score, Vec3 center, AABB bounds, int minY, int maxY,
                        int chunks, int sections, String counts, List<String> evidence) {
         public String label() {
             return raided ? type.label + " (raided?)" : type.label;
@@ -65,6 +66,16 @@ public class BaseFinder extends BlockEspModule {
     }
 
     private record ChunkRating(Vec3 pos, int rating, boolean isSite) {}
+
+    /** How likely one chunk is to hold a base, for the map screen. */
+    public record Cell(int cx, int cz, int rating, int minY, int maxY, boolean inSite) {}
+
+    public enum MarkerStyle {
+        VOLUME("Around Blocks"), MARKER("Small Marker");
+        private final String label;
+        MarkerStyle(String label) { this.label = label; }
+        @Override public String toString() { return label; }
+    }
 
     private static final Map<Block, Integer> KINDS = new HashMap<>();
 
@@ -91,6 +102,7 @@ public class BaseFinder extends BlockEspModule {
     private static final class Acc {
         final int[] counts = new int[15];
         int cx, cz, minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE, n, sectionMask;
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
         long sumX, sumY, sumZ;
         int loose;
     }
@@ -116,7 +128,7 @@ public class BaseFinder extends BlockEspModule {
 
     // site detection and display
     private final Setting.Num minScore = new Setting.Num("Min Site Score", 8, 2, 80, 1, " pts");
-    private final Setting.Num raidSensitivity = new Setting.Num("Raid Sensitivity (lower = more)", 5, 1, 30, 1, " pts");
+    private final Setting.Num raidSensitivity = new Setting.Num("Raid Sensitivity (lower = more)", 8, 1, 30, 1, " pts");
     private final Setting.Bool panel = new Setting.Bool("Show List Panel", true);
     private final Setting.Num panelEntries = new Setting.Num("List Entries", 5, 1, 10, 1, "");
     private final Setting.Bool tooltip = new Setting.Bool("Show Aim Tooltip", true);
@@ -150,6 +162,7 @@ public class BaseFinder extends BlockEspModule {
     private final Map<Long, Integer> itemCounts = new HashMap<>();
     private List<Site> sites = List.of();
     private List<ChunkRating> ratings = List.of();
+    private List<Cell> cells = List.of();
     private int itemTick;
     private boolean overworld = true;
 
@@ -175,6 +188,7 @@ public class BaseFinder extends BlockEspModule {
         add(joinChunks);
         add(surfaceY);
         add(surfacePenalty);
+        add(markerStyle);
         add(rateChunks);
         add(minRating, rateChunks::get);
         add(chunkLabels, rateChunks::get);
@@ -218,6 +232,7 @@ public class BaseFinder extends BlockEspModule {
     // ---- accessors for the on-screen overlay ----
 
     public List<Site> sites() { return sites; }
+    public List<Cell> cells() { return cells; }
     public boolean panelOn() { return panel.get(); }
     public int panelEntries() { return panelEntries.i(); }
     public boolean tooltipOn() { return tooltip.get(); }
@@ -238,6 +253,7 @@ public class BaseFinder extends BlockEspModule {
         itemCounts.clear();
         sites = List.of();
         ratings = List.of();
+        cells = List.of();
     }
 
     // ---- scanning ----
@@ -321,6 +337,10 @@ public class BaseFinder extends BlockEspModule {
             a.sumZ += p.getZ();
             a.minY = Math.min(a.minY, p.getY());
             a.maxY = Math.max(a.maxY, p.getY());
+            a.minX = Math.min(a.minX, p.getX());
+            a.maxX = Math.max(a.maxX, p.getX());
+            a.minZ = Math.min(a.minZ, p.getZ());
+            a.maxZ = Math.max(a.maxZ, p.getZ());
             int section = Math.max(0, Math.min(31, (p.getY() >> 4) + 4));
             a.sectionMask |= 1 << section;
         }
@@ -334,6 +354,7 @@ public class BaseFinder extends BlockEspModule {
         List<Target> groupSlabs = new ArrayList<>();
         List<ChunkRating> groupRatings = new ArrayList<>();
         Set<Long> seen = new HashSet<>();
+        Set<Long> siteChunks = new HashSet<>();
         for (Map.Entry<Long, Acc> start : chunks.entrySet()) {
             if (!seen.add(start.getKey())) continue;
             List<Acc> group = new ArrayList<>();
@@ -356,11 +377,13 @@ public class BaseFinder extends BlockEspModule {
             int[] tot = new int[15];
             double sumY = 0;
             long n = 0;
+            int groupMinY = Integer.MAX_VALUE;
             int minCx = Integer.MAX_VALUE, maxCx = Integer.MIN_VALUE, minCz = Integer.MAX_VALUE, maxCz = Integer.MIN_VALUE;
             for (Acc a : group) {
                 for (int i = 0; i < tot.length; i++) tot[i] += a.counts[i];
                 sumY += a.sumY;
                 n += a.n;
+                groupMinY = Math.min(groupMinY, a.minY);
                 minCx = Math.min(minCx, a.cx);
                 maxCx = Math.max(maxCx, a.cx);
                 minCz = Math.min(minCz, a.cz);
@@ -371,20 +394,33 @@ public class BaseFinder extends BlockEspModule {
             double factor = surfaceFactor(avgY);
 
             Site site = evaluate(group, factor);
-            if (site != null) found.add(site);
+            if (site != null) {
+                found.add(site);
+                for (Acc a : group) siteChunks.add(chunkKey(a.cx, a.cz));
+            }
 
             if (rateChunks.get()) {
                 double act = activityOf(tot) * factor;
                 int rating = (int) Math.round(100 * act / (act + 15.0));
                 if (rating >= minRating.i()) {
-                    AABB slab = new AABB(minCx * 16, avgY - 0.6, minCz * 16, (maxCx + 1) * 16, avgY - 0.3, (maxCz + 1) * 16);
-                    groupSlabs.add(new Target(BlockPos.containing(minCx * 16, avgY, minCz * 16), slab, levelOf(rating)));
+                    // the plate sits just under the lowest detected block, so underground sites are drawn underground
+                    AABB slab = new AABB(minCx * 16, groupMinY - 0.9, minCz * 16, (maxCx + 1) * 16, groupMinY - 0.6, (maxCz + 1) * 16);
+                    groupSlabs.add(new Target(BlockPos.containing(minCx * 16, groupMinY, minCz * 16), slab, levelOf(rating)));
                     groupRatings.add(new ChunkRating(new Vec3((minCx + maxCx + 1) * 8.0, avgY + 1.5, (minCz + maxCz + 1) * 8.0),
                             rating, site != null));
                 }
             }
         }
         sites = found;
+
+        List<Cell> cellList = new ArrayList<>();
+        for (Acc a : chunks.values()) {
+            if (a.n == 0) continue;
+            double act = activityOf(a.counts) * surfaceFactor(a.sumY / (double) a.n);
+            int rating = (int) Math.round(100 * act / (act + 15.0));
+            cellList.add(new Cell(a.cx, a.cz, rating, a.minY, a.maxY, siteChunks.contains(chunkKey(a.cx, a.cz))));
+        }
+        cells = cellList;
 
         // 3. what gets drawn: amethyst, optional single blocks, and one marker per site
         List<Target> out = new ArrayList<>();
@@ -403,7 +439,9 @@ public class BaseFinder extends BlockEspModule {
                 case UNKNOWN -> S_UNKNOWN;
             };
             Vec3 c = s.center();
-            AABB box = new AABB(c.x - 0.45, c.y - 0.45, c.z - 0.45, c.x + 0.45, c.y + 0.45, c.z + 0.45);
+            AABB box = markerStyle.get() == MarkerStyle.VOLUME
+                    ? s.bounds()
+                    : new AABB(c.x - 0.45, c.y - 0.45, c.z - 0.45, c.x + 0.45, c.y + 0.45, c.z + 0.45);
             out.add(new Target(BlockPos.containing(c), box, kind));
         }
         return out;
@@ -413,6 +451,7 @@ public class BaseFinder extends BlockEspModule {
         int[] c = new int[15];
         long sumX = 0, sumY = 0, sumZ = 0, n = 0;
         int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE, mask = 0, loose = 0;
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
         for (Acc a : group) {
             for (int i = 0; i < c.length; i++) c[i] += a.counts[i];
             sumX += a.sumX;
@@ -421,6 +460,10 @@ public class BaseFinder extends BlockEspModule {
             n += a.n;
             minY = Math.min(minY, a.minY);
             maxY = Math.max(maxY, a.maxY);
+            minX = Math.min(minX, a.minX);
+            maxX = Math.max(maxX, a.maxX);
+            minZ = Math.min(minZ, a.minZ);
+            maxZ = Math.max(maxZ, a.maxZ);
             mask |= a.sectionMask;
             loose += a.loose;
         }
@@ -456,7 +499,8 @@ public class BaseFinder extends BlockEspModule {
             if (conf < 40) type = Type.UNKNOWN;
         }
 
-        double damage = 3.0 * c[TNT] + 2.0 * c[FIRE] + loose;
+        // Loose items are everywhere (mob drops, dropped stacks), so they can only add a little on their own.
+        double damage = 3.0 * c[TNT] + 2.0 * c[FIRE] + Math.min(4.0, 0.15 * loose);
         boolean raided = useDamage.get() && damage >= raidSensitivity.d();
 
         List<String> counts = new ArrayList<>();
@@ -479,7 +523,9 @@ public class BaseFinder extends BlockEspModule {
         if (raided) evidence.add("Damage signs nearby: may be raided");
 
         Vec3 center = new Vec3(sumX / (double) n + 0.5, sumY / (double) n + 0.5, sumZ / (double) n + 0.5);
-        return new Site(type, raided, conf, (int) Math.round(activity), center, minY, maxY,
+        // The box hugs the detected blocks at their real depth, padded a little and at least 3 blocks tall.
+        AABB bounds = new AABB(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1).inflate(1.0, 0.5, 1.0);
+        return new Site(type, raided, conf, (int) Math.round(activity), center, bounds, minY, maxY,
                 group.size(), Integer.bitCount(mask), countText, evidence);
     }
 
@@ -541,7 +587,7 @@ public class BaseFinder extends BlockEspModule {
             double dist = s.center().distanceTo(cam);
             float scale = labelSize.f() * (float) Math.max(1.0, dist / 8.0);
             String text = s.label() + " " + s.conf() + "% " + Math.round(dist) + "m";
-            EspDraw.text(s.center().add(0, 1.3, 0), text, colorOf(s), scale, throughWalls.get());
+            EspDraw.text(new Vec3(s.center().x, s.bounds().maxY + 1.0, s.center().z), text, colorOf(s), scale, throughWalls.get());
         }
     }
 

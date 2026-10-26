@@ -46,6 +46,23 @@ Shared customization: mode (Outline / Filled / Outline + Fill / Corners), outlin
 fill opacity, line width, color mode (Static / Rainbow / Pulse), box expand, range,
 distance fade, through-walls, tracers (+ opacity), scan interval.
 
+## New: map, wheel, region ping, auto RTP
+
+- **Base Finder map** (press **B**): chunk map around you with three layers (Chunk Analysis, Live Players, Resources),
+  a signals panel and a "Likely Base" box. Needs Base Finder on. Click the colored chips to hide a layer.
+  Player names and dotted paths show up when **Trails** is on.
+- **Donut Wheel** (hold **G**, point at a slice, let go): /rtp, /ah, Kit PvP (macro, sends `/kit pvp`), ESP (toggle),
+  Trails (toggle), /spawn, /home, /sell. Commands go to the server exactly as if typed in chat.
+- **Region Map** (press **N**): dotted world map with live pings for EU Central, NA East, NA West, Asia and Oceania,
+  a ranked list and a Connect button. Put server addresses in `config/nova-regions.json` (created on first use).
+  The ping is the connection time to a public cloud endpoint in each region.
+- **Auto RTP** (Utility tab): sends /rtp, waits, checks the landing spot (min distance, water, player-made blocks nearby
+  as a "claimed" guess) and retries. Panel top-right, log bottom-left.
+- **Coords HUD**: XYZ and biome box. Auto RTP shows it too.
+- **Trails** (Render tab): paths behind nearby players.
+
+All keys can be changed in Controls under Nova Client.
+
 ## Version-sensitive spots (26.2 is new, fix here first if it fails to compile)
 
 - `render/EspDraw.java`: all world drawing, via `net.minecraft.gizmos.Gizmos`.
@@ -54,6 +71,9 @@ distance fade, through-walls, tracers (+ opacity), scan interval.
 - `gui/Draw.java` and `gui/ClickGui.java`: `GuiGraphicsExtractor` calls and the
   `MouseButtonEvent` / `KeyEvent` input signatures.
 - `EspModule.render`: `Camera.position()`.
+- `util/Compat.java`: calls made by name (send command, biome name, key lookup, clipboard). If one stops working it fails quietly.
+- `util/RegionPing.java`: connecting to a server is also done by name, since that call changes a lot between versions.
+- `gui/BaseMapScreen.java`: terrain colors use `BlockState.getMapColor` and `Level.getHeight`.
 
 To check a real signature, run `javap -p` on the deobfuscated jar under
 `~/.gradle/caches/fabric-loom/`.

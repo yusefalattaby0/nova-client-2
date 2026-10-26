@@ -3,7 +3,7 @@
   "id": "nova",
   "version": "${version}",
   "name": "Nova Client",
-  "description": "Storage Finder and Spawner Finder with a modern ClickGUI.",
+  "description": "ESP, Base Finder, Freecam, Auto RTP, Donut Wheel and Region Map with a modern ClickGUI.",
   "authors": ["You"],
   "license": "MIT",
   "environment": "client",
